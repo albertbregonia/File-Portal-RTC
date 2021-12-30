@@ -50,6 +50,7 @@ rtc.ondatachannel = ({channel}) => {
     console.log(`Channel initialized!`);
 };
 
+//Handles information about the transfer such as file information and accepting/denying requests to transfer
 function metadataHandler({data}) {
     const signal = JSON.parse(data);
     switch(signal.event) {
@@ -86,6 +87,7 @@ function metadataHandler({data}) {
     }
 }
 
+//Handles data being sent on a file transfer channel and reassembling the chunks into a file
 function transferHandler({target, data}) {
     let index = parseInt(target.label), 
         end = currentTransfer.buffer.length - 1;
@@ -111,7 +113,7 @@ function transferHandler({target, data}) {
 
 function resetTransfer() {
     progressBar.value =
-    currentTransfer.timeStart = 
+        currentTransfer.timeStart = 
         currentTransfer.counter = 0;
     currentTransfer.buffer =
         currentTransfer.filename = undefined;
