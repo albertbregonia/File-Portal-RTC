@@ -1,3 +1,4 @@
+//File-Portal-RTC © Albert Bregonia 2021
 
 //HTML elements
 const loginDialog = document.getElementById(`login-dialog`),

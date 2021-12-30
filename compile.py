@@ -1,3 +1,6 @@
+# File-Portal-RTC © Albert Bregonia 2021
+
+# Simple Python script to combine the HTML/CSS/JS into one HTML file and minimize the total file size
 import re
 with (open('file-transfer.html', 'w') as output, 
       open('index.html', 'r') as html,
