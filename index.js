@@ -8,7 +8,8 @@ const loginDialog = document.getElementById(`login-dialog`),
       iceInput = document.getElementById(`ice-input`),
       copyICE = document.getElementById(`copy-ice`),
       transferDialog = document.getElementById(`transfer-dialog`),
-      fileSelector = document.getElementById(`file-selector`);
+      fileSelector = document.getElementById(`file-selector`),
+      progressBar = document.getElementById(`progress-bar`);
 
 //WebRTC connection
 const chunkSize = 256*1024, //256kb per message (WebRTC says this isn't possible but anything higher than this throws an error)
@@ -30,6 +31,7 @@ rtc.oniceconnectionstatechange = () => {
             break;
         case `disconnected`:
             alert(`Disconnected`);
+            location.reload();
             break;
         case `connected`:
             alert(`Connection Established`);
@@ -40,45 +42,79 @@ rtc.oniceconnectionstatechange = () => {
 rtc.ondatachannel = ({channel}) => {
     if(channel.label == `metadata`) {
         rtc.metadataChannel = channel;
-        rtc.metadataChannel.onmessage = ({data}) => {
-            const signal = JSON.parse(data);
-            if(signal.event == `start`) {
-                currentTransfer.timeStart = new Date();
-                currentTransfer.counter = 0;
-                currentTransfer.buffer = new Array(signal.bufferSize);
-                currentTransfer.filename = signal.filename;
-                alert(`Receiving: ${signal.filename}`);
-            }
-        };
+        rtc.metadataChannel.onmessage = metadataHandler;
     } else {
-        channel.onmessage = ({data}) => {
-            let index = parseInt(channel.label), 
-                end = currentTransfer.buffer.length - 1;
-            while(currentTransfer.buffer[index])
-                if((index += transferChannelCount) > end)
-                    index = end;
-            currentTransfer.buffer[index] = data;
-            currentTransfer.counter++;
-            if(currentTransfer.counter == end+1) {
-                console.log(`Elapsed: ${(new Date() - currentTransfer.timeStart)/1000.0} seconds`);
-                const link = document.createElement(`a`);
-                hideElements(link);
-                link.href = URL.createObjectURL(new Blob(currentTransfer.buffer));
-                link.download = currentTransfer.filename;
-                link.click();
-                currentTransfer.timeStart = 
-                    currentTransfer.counter = 0;
-                currentTransfer.buffer = 
-                    currentTransfer.filename = undefined;
-            }
-        };
+        rtc.transferChannels[channel.label] = channel;
+        channel.onmessage = transferHandler;
     }
     console.log(`Channel initialized!`);
 };
 
-function hideElements(...elements) {
-    for(const element of elements)
-        element.style.display = `none`;
+function metadataHandler({data}) {
+    const signal = JSON.parse(data);
+    switch(signal.event) {
+        case `start`:
+            if(!confirm(`Confirm transfer of: '${signal.filename}'`)) {
+                alert(`Transfer request for '${signal.filename}' denied`);
+                rtc.metadataChannel.send(JSON.stringify({event: `denied`}));
+                return;
+            }
+            alert(`Transfer request for '${signal.filename}' was accepted.`);
+            currentTransfer.timeStart = new Date(); //save pending transfer information
+            currentTransfer.counter = 0;
+            currentTransfer.buffer = new Array(progressBar.max = signal.bufferSize);
+            currentTransfer.filename = signal.filename;
+            rtc.metadataChannel.send(JSON.stringify({event: `accepted`})); //tell sender to start the transfer
+            break;
+        case `accepted`:
+            alert(`Transfer request for '${currentTransfer.filename}' was accepted.`);
+            for(let chunk=0, i=0; chunk<currentTransfer.buffer.byteLength; i++) 
+                rtc.transferChannels[i%transferChannelCount] //evenly distribute the chunks of binary data in order to prevent overloading the buffers
+                    .send(currentTransfer.buffer.slice(chunk, (chunk+=chunkSize)));
+            break;
+        case `denied`:
+            alert(`Transfer request for '${currentTransfer.filename}' was denied.`);
+            resetTransfer(); //delete pending transfer info
+            break;
+        case `progress`:
+            progressBar.value = signal.value;
+            if(!signal.value) {
+                alert(`Transfer complete. '${currentTransfer.filename}' was sent in ${signal.timeElapsed} seconds`);
+                resetTransfer();
+            }
+            break;
+    }
+}
+
+function transferHandler({target, data}) {
+    let index = parseInt(target.label), 
+        end = currentTransfer.buffer.length - 1;
+    while(currentTransfer.buffer[index])          //data at certain indicies will be sent on the channel that they are a modulus of.
+        if((index += transferChannelCount) > end) //indicies: [0, 512, 1024, ...] will be sent on channel 0 as n%channelCount == 0
+            index = end;                          //indicies: [1, 513, 1025, ...] will be sent on channel 1 as n%channelCount == 1 ... etc
+    currentTransfer.buffer[index] = data;
+    progressBar.value = currentTransfer.counter++;
+    rtc.metadataChannel.send(JSON.stringify({event: `progress`, value: currentTransfer.counter})); //send progress to sender
+    if(currentTransfer.counter == end+1) {
+        const duration = (new Date() - currentTransfer.timeStart)/1000.0;
+        console.log(`Elapsed: ${duration} seconds`);
+        const link = document.createElement(`a`);
+        hideElements(link);
+        link.href = URL.createObjectURL(new Blob(currentTransfer.buffer));
+        link.download = currentTransfer.filename;
+        link.click();
+        //reset transfer information
+        rtc.metadataChannel.send(JSON.stringify({event: `progress`, value: 0, timeElapsed: duration}));
+        resetTransfer();
+    }
+}
+
+function resetTransfer() {
+    progressBar.value =
+    currentTransfer.timeStart = 
+        currentTransfer.counter = 0;
+    currentTransfer.buffer =
+        currentTransfer.filename = undefined;
 }
 
 async function rtcSetup(sending) {
@@ -111,40 +147,47 @@ async function rtcSetup(sending) {
         alert(`Local connection info has been copied to your clipboard. Please send this to your peer.`);
     };
     transferDialog.onsubmit = () => {
-        if(fileSelector.files.length != 1 || currentTransfer.buffer) {
-            alert(`Only 1 file is allowed to be sent at a time!`);
+        if(!fileSelector.files) {
+            alert(`No files selected. Please select a file before sending.`);
+            return;
+        } else if(fileSelector.files.length != 1 || currentTransfer.buffer) {
+            alert(`Only 1 file is allowed to be sent at a time.`);
             return;
         }
         const file = fileSelector.files[0],
               reader = new FileReader();
-        if(!confirm(`Confirm sending: ${file.name}`)) {
+        if(!confirm(`Confirm transfer of: '${file.name}'`)) {
             alert(`Transfer cancelled`);
             return;
         }
         reader.onload = ({target}) => {
             const fileContent = target.result;
-            rtc.metadataChannel.send(JSON.stringify({ //send info about the file to be transferred for initialization
+            rtc.metadataChannel.send(JSON.stringify({ //send a request to transfer the file
                 event: `start`,
                 bufferSize: Math.ceil(1.0*fileContent.byteLength/chunkSize),
                 filename: file.name,
             }));
-            for(let chunk=0, i=0; chunk<fileContent.byteLength; i++) 
-                rtc.transferChannels[i%transferChannelCount] //evenly distribute the chunks of binary data in order to prevent overloading the buffers
-                    .send(fileContent.slice(chunk, (chunk+=chunkSize)));
+            //save information about the pending transfer
+            progressBar.value = 0;
+            progressBar.max = Math.ceil(1.0*fileContent.byteLength/chunkSize);
+            currentTransfer.buffer = fileContent;
+            currentTransfer.filename = file.name;
         };
         reader.readAsArrayBuffer(file);
         return false;
     };
     //selection specific setup
     hideElements(loginDialog);
+    rtc.transferChannels = new Array(transferChannelCount);
     if(sending) { //create metadata and file transfer channels
         const channelErrorHandler = ({error}) => console.error(error);
         rtc.metadataChannel = rtc.createDataChannel(`metadata`);
         rtc.metadataChannel.onerror = channelErrorHandler;
-        rtc.transferChannels = new Array(transferChannelCount);
+        rtc.metadataChannel.onmessage = metadataHandler;
         for(let i=0; i<transferChannelCount; i++) { //`channelCount` channels are created in order to spread out the data and not overload the buffer
-            rtc.transferChannels[i] = rtc.createDataChannel(i);
-            rtc.transferChannels[i].onerror = channelErrorHandler;
+            const channel = rtc.transferChannels[i] = rtc.createDataChannel(i);
+            channel.onmessage = transferHandler;
+            channel.onerror = channelErrorHandler;
         }
         const offer = await rtc.createOffer();
         await rtc.setLocalDescription(offer);
@@ -153,4 +196,9 @@ async function rtcSetup(sending) {
     } else {
         alert(`Waiting for remote ID...`);
     }
+}
+
+function hideElements(...elements) {
+    for(const element of elements)
+        element.style.display = `none`;
 }
