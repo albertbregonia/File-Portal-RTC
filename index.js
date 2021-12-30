@@ -16,7 +16,6 @@ const chunkSize = 256*1024, //256kb per message (WebRTC says this isn't possible
       transferChannelCount = 512 - 1, //-1 for metadata channel, the theoretical maximum is 65535 bc of ports but chrome limits me to 512 channels
       currentTransfer = { //information about the current file transfer
         timeStart: 0,
-        counter: 0,
         filename: undefined,
         buffer: undefined,
       }, iceCandidates = [],
@@ -54,7 +53,7 @@ rtc.ondatachannel = ({channel}) => {
 function metadataHandler({data}) {
     const signal = JSON.parse(data);
     switch(signal.event) {
-        case `start`:
+        case `request`:
             if(!confirm(`Confirm transfer of: '${signal.filename}'`)) {
                 alert(`Transfer request for '${signal.filename}' denied`);
                 rtc.metadataChannel.send(JSON.stringify({event: `denied`}));
@@ -62,16 +61,15 @@ function metadataHandler({data}) {
             }
             alert(`Transfer request for '${signal.filename}' was accepted.`);
             currentTransfer.timeStart = new Date(); //save pending transfer information
-            currentTransfer.counter = 0;
-            currentTransfer.buffer = new Array(progressBar.max = signal.bufferSize);
+            currentTransfer.fileContent = new Array(progressBar.max = signal.bufferSize);
             currentTransfer.filename = signal.filename;
             rtc.metadataChannel.send(JSON.stringify({event: `accepted`})); //tell sender to start the transfer
             break;
         case `accepted`:
             alert(`Transfer request for '${currentTransfer.filename}' was accepted.`);
-            for(let chunk=0, i=0; chunk<currentTransfer.buffer.byteLength; i++) 
+            for(let chunk=0, i=0; chunk<currentTransfer.fileContent.byteLength; i++) 
                 rtc.transferChannels[i%transferChannelCount] //evenly distribute the chunks of binary data in order to prevent overloading the buffers
-                    .send(currentTransfer.buffer.slice(chunk, (chunk+=chunkSize)));
+                    .send(currentTransfer.fileContent.slice(chunk, (chunk+=chunkSize)));
             break;
         case `denied`:
             alert(`Transfer request for '${currentTransfer.filename}' was denied.`);
@@ -90,33 +88,33 @@ function metadataHandler({data}) {
 //Handles data being sent on a file transfer channel and reassembling the chunks into a file
 function transferHandler({target, data}) {
     let index = parseInt(target.label), 
-        end = currentTransfer.buffer.length - 1;
-    while(currentTransfer.buffer[index])          //data at certain indicies will be sent on the channel that they are a modulus of.
+        end = currentTransfer.fileContent.length - 1;
+    while(currentTransfer.fileContent[index])          //data at certain indicies will be sent on the channel that they are a modulus of.
         if((index += transferChannelCount) > end) //indicies: [0, 512, 1024, ...] will be sent on channel 0 as n%channelCount == 0
             index = end;                          //indicies: [1, 513, 1025, ...] will be sent on channel 1 as n%channelCount == 1 ... etc
-    currentTransfer.buffer[index] = data;
-    progressBar.value = currentTransfer.counter++;
-    rtc.metadataChannel.send(JSON.stringify({event: `progress`, value: currentTransfer.counter})); //send progress to sender
-    if(currentTransfer.counter == end+1) {
+    currentTransfer.fileContent[index] = data;
+    rtc.metadataChannel.send(JSON.stringify({
+        event: `progress`, //update progress and echo to sender 
+        value: ++progressBar.value
+    }));
+    if(progressBar.value == progressBar.max) {
         const duration = (new Date() - currentTransfer.timeStart)/1000.0;
         console.log(`Elapsed: ${duration} seconds`);
         const link = document.createElement(`a`);
         hideElements(link);
-        link.href = URL.createObjectURL(new Blob(currentTransfer.buffer));
+        link.href = URL.createObjectURL(new Blob(currentTransfer.fileContent));
         link.download = currentTransfer.filename;
-        link.click();
-        //reset transfer information
-        rtc.metadataChannel.send(JSON.stringify({event: `progress`, value: 0, timeElapsed: duration}));
-        resetTransfer();
+        link.click(); //start download
+        rtc.metadataChannel.send(JSON.stringify({event: `progress`, value: 0, timeElapsed: duration})); //notify the sender of completion
+        resetTransfer(); //reset transfer information
     }
 }
 
 function resetTransfer() {
     progressBar.value =
-        currentTransfer.timeStart = 
-        currentTransfer.counter = 0;
-    currentTransfer.buffer =
-        currentTransfer.filename = undefined;
+        currentTransfer.timeStart =
+        currentTransfer.fileContent =
+        currentTransfer.filename = 0;
 }
 
 async function rtcSetup(sending) {
@@ -152,7 +150,7 @@ async function rtcSetup(sending) {
         if(!fileSelector.files) {
             alert(`No files selected. Please select a file before sending.`);
             return;
-        } else if(fileSelector.files.length != 1 || currentTransfer.buffer) {
+        } else if(fileSelector.files.length != 1 || currentTransfer.fileContent) {
             alert(`Only 1 file is allowed to be sent at a time.`);
             return;
         }
@@ -165,14 +163,14 @@ async function rtcSetup(sending) {
         reader.onload = ({target}) => {
             const fileContent = target.result;
             rtc.metadataChannel.send(JSON.stringify({ //send a request to transfer the file
-                event: `start`,
+                event: `request`,
                 bufferSize: Math.ceil(1.0*fileContent.byteLength/chunkSize),
                 filename: file.name,
             }));
             //save information about the pending transfer
             progressBar.value = 0;
             progressBar.max = Math.ceil(1.0*fileContent.byteLength/chunkSize);
-            currentTransfer.buffer = fileContent;
+            currentTransfer.fileContent = fileContent;
             currentTransfer.filename = file.name;
         };
         reader.readAsArrayBuffer(file);
