@@ -8,31 +8,32 @@
     <title>WebRTC File Transfer</title>
 </head>
 <body>
-    <div id="login-dialog">
-        <button onclick="rtcSetup(true)">Send</button>
-        <button onclick="rtcSetup();">Receive</button>
-    </div>
-    <br/>
-    <form id="remote-dialog">
-        <label for="remote-input">Remote ID</label>
-        <input type="text" id="remote-input"/>
-        <input type="submit" value="Save">
-    </form>
-    <br/>
-    <form id="ice-dialog">
-        <input type="button" id="copy-ice" value="Copy Local Connection Info">
+    <main>
+        <div id="login-dialog">
+            <button onclick="rtcSetup(true)">Send</button>
+            <button onclick="rtcSetup();">Receive</button>
+        </div>
         <br/>
-        <label for="ice-input">Remote Connection Info</label>
+        <form id="remote-dialog">
+            <label for="remote-input">Remote ID</label>
+            <input type="text" id="remote-input"/>
+            <input type="submit" value="Save">
+        </form>
         <br/>
-        <input type="text" id="ice-input"/>
-        <input type="submit" value="Save">
-    </form>
-    <br/>
-    <form id="transfer-dialog">
-        <input type="file" id="file-selector"/>
-        <input type="submit" value="Send">
-    </form>
-    <progress id="progress-bar" value="0"></progress>
+        <form id="ice-dialog">
+            <input type="button" id="copy-ice" value="Copy Local Connection">
+            <br>
+            <label for="ice-input">Remote Connection</label>
+            <input type="text" id="ice-input"/>
+            <input type="submit" value="Save">
+        </form>
+        <br/>
+        <form id="transfer-dialog">
+            <input type="file" id="file-selector"/>
+            <input type="submit" value="Send">
+            <progress id="progress-bar" value="0"></progress>
+        </form>
+    </main>
     <script src="index.js"></script>
 </body>
 </html>

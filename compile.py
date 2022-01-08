@@ -9,7 +9,7 @@ with (open('file-transfer.html', 'w') as output,
     output.write(re.sub(
         r'\s{2,}|\n', '', #remove whitespace of length > 2 or \n's
         re.sub(
-            r'//.*', '', #delete all comments
+            r'//.*|/\*(\S|\s)*\*/', '', #delete all comments
             html.read()
             .replace('<link rel="stylesheet" href="index.css">', f'<style>{css.read()}</style>')
             .replace('<script src="index.js"></script>', f'<script>{js.read()}</script>')

@@ -12,7 +12,7 @@ const loginDialog = document.getElementById(`login-dialog`),
       progressBar = document.getElementById(`progress-bar`);
 
 //WebRTC connection
-const chunkSize = 256*1024, //256kb per message (WebRTC says this isn't possible but anything higher than this throws an error)
+const chunkSize = 256*1024, //256kb per message (WebRTC says this isn't possible but anything higher than this throws an error on chrome)
       transferChannelCount = 512 - 1, //-1 for metadata channel, the theoretical maximum is 65535 bc of ports but chrome limits me to 512 channels
       currentTransfer = { //information about the current file transfer
         timeStart: 0,
@@ -35,6 +35,7 @@ rtc.oniceconnectionstatechange = () => {
         case `connected`:
             alert(`Connection Established`);
             hideElements(iceDialog, copyICE);
+            showElements(transferDialog);
             break;
     }
 };
@@ -131,6 +132,7 @@ async function rtcSetup(sending) {
                 alert(`Successfully saved remote ID. Please copy your local connection info and send it to your peer.`);
             }
             hideElements(remoteDialog);
+            showElements(iceDialog);
         })();
         return false;
     };
@@ -178,6 +180,7 @@ async function rtcSetup(sending) {
     };
     //selection specific setup
     hideElements(loginDialog);
+    showElements(remoteDialog);
     rtc.transferChannels = new Array(transferChannelCount);
     if(sending) { //create metadata and file transfer channels
         const channelErrorHandler = ({error}) => console.error(error);
@@ -201,4 +204,9 @@ async function rtcSetup(sending) {
 function hideElements(...elements) {
     for(const element of elements)
         element.style.display = `none`;
+}
+
+function showElements(...elements) {
+    for(const element of elements)
+        element.style.display = `block`;
 }
